@@ -827,6 +827,15 @@ def server_started_predicate(server, mongod_process):
     return server_started
 
 ###############################################################################
+def server_is_writeable_predicate(server):
+    def server_da_boss():
+        return server.is_online() and is_replica_primary(server)
+    def server_online():
+        return server.is_online()
+
+    return server_da_boss if is_cluster_member(server) else server_online
+
+###############################################################################
 def pid_dead_predicate(pid):
     def pid_dead():
         return not is_pid_alive(pid)
@@ -945,12 +954,50 @@ def lookup_all_servers():
     validate_repositories()
 
     all_servers = []
-    if has_file_repository():
+    if has_file_repository() and not is_seeding_repository():
+            # for now assume that the only place to be seeding db repo from
+            # is the file repo, and so once seeded we only consult the latter
         all_servers = list(get_configured_servers().values())
     if has_db_repository():
         all_servers.extend(db_lookup_all_servers())
 
     return all_servers
+
+###############################################################################
+# seeds db repo with servers and clusters
+def seed_db_repository():
+    seed_collection(get_mongoctl_server_db_collection(), 
+                    get_configured_servers())
+    # TODO: if u throw exception here, still offers to init repl set??
+    seed_collection(get_mongoctl_cluster_db_collection(), 
+                    get_configured_clusters())
+
+def seed_collection(clxn, seed_values_by_id):
+    # do this the simplest way possible for now ... only insert, no updates.
+    seed_docs = [wrapr.get_document() for wrapr in seed_values_by_id.values()]
+    try:
+        clxn.insert(seed_docs, safe=True, continue_on_error=True)
+    except Exception, e:
+        log_error("Got an error back from %s.insert : %s"%
+                  (clxn.full_name, str(e)))
+        
+def crapevolve_seed_db_repository():
+    fs_servers_by_id = get_configured_servers()
+    fs_servers = list(fs_servers_by_id.values())
+    fs_svr_ids = [ s.get_id() for s in fs_servers ]
+    server_clxn = get_mongoctl_server_db_collection()
+    db_servers_preexisting = server_clxn.find({ '_id' : { '$in' : fs_svr_ids } })
+
+    def corresponding_fs_svr( db_svr ):
+        return "turd"
+
+    reseed_candidates = []
+    for db_svr in db_servers_preexisting :
+        reseed_candidates.append( corresponding_fs_svr( db_svr ) )
+
+def is_seeding_repository():
+    return (has_db_repository() and
+            get_mongoctl_config_val("seedDatabaseRepository", default=False))
 
 ###############################################################################
 # returns servers saved in the db collection of servers
@@ -1398,6 +1445,7 @@ def version_obj(version_str):
 def prepare_server(server):
     log_info("Preparing server '%s' for use as configured..." % server.get_id())
     setup_server_credentials(server)
+    seed_server_maybe(server)
 
 ###############################################################################
 def mk_server_dir(server):
@@ -1498,6 +1546,52 @@ def setup_server_admin_credentials(server):
         raise MongoctlException(
             "Error while setting up admin credentials on server '%s'."
             "\n Cause: %s" % (server.get_id(), e))
+
+###############################################################################
+# Seeding : as ye insert, so shall ye retrieve
+
+def seed_server_maybe(server):
+    booty_seed = is_mongoctl_repo_db(server) and is_seeding_repository()
+    (seed_specs, index_specs) = server.get_seeding_specs()
+    if not booty_seed and seed_specs is None and index_specs is None: #pygrammar!
+        return                  # ho-hum.
+    if not wait_for(server_is_writeable_predicate(server), timeout=300):
+        raise Exception("Cannot seed non-primary server!")
+    if booty_seed:
+        seed_db_repository()
+    if seed_specs is not None:
+        log_info("Seeding data into server '%s'..." % server.get_id())
+        for spec in seed_specs:
+            seed_server_from_spec(server, spec)
+    if index_specs is not None:
+        log_info("Ensuring indexes for server '%s'..." % server.get_id())
+        for spec in index_specs:
+            index_server_from_spec(server, spec)
+
+def seed_server_from_spec(server, seed_spec):
+    db_name = get_document_property(seed_spec, "db")
+    clxn_name = get_document_property(seed_spec, "collection")
+    seed_file_name = get_document_property(seed_spec, "file")
+    fields_to_nix = get_document_property(seed_spec, "excludeFields", default=[])
+    db = server.get_authenticate_db(db_name)
+    log_info("Seeding server '%s' ns='%s.%s' data from %s (excluding %s)" %
+             (server.get_id(), db_name, clxn_name, seed_file_name, fields_to_nix))
+    log_info(" ... NOT!") #XXX TODO
+    pass
+
+def seed_with_documents(clxn, docs_by_id):
+    return seed_collection(clxn, docs_by_id)
+
+def index_server_from_spec(server, idx_spec):
+    db_name = get_document_property(idx_spec, "db")
+    clxn_name = get_document_property(idx_spec, "collection")
+    idx_defn = get_document_property(idx_spec, "index")
+    db = server.get_authenticate_db(db_name)
+    log_info("Seeding server '%s' ns='%s.%s' ensuring index %s ..." %
+             (server.get_id(), db_name, clxn_name, idx_defn))
+    idx_defn_aslist = [key_n_dir for key_n_dir in idx_defn.items()] #TODO: validate?
+    db[clxn_name].ensure_index(idx_defn_aslist)  #TODO: optional params (unique, drop_dups, &c.)
+
 
 ###############################################################################
 # Mongoctl Database Functions
@@ -2308,6 +2402,9 @@ class Server(DocumentWrapper):
 
         return self.get_db_credentials(dbname)[0]
 
+    ###########################################################################
+    def get_seeding_specs(self):
+        return (self.get_property("seeds"), self.get_property("indexes"))
 
 
     ###########################################################################
