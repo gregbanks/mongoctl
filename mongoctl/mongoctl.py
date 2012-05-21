@@ -976,7 +976,6 @@ def seed_db_repository():
     # TODO: if u throw exception here, still offers to init repl set??
     seed_collection_from_wrapped_doc_dict(get_mongoctl_cluster_db_collection(), 
                                           get_configured_clusters())
-    has_seeded_repository(True)
 
 def seed_collection_from_wrapped_doc_dict(clxn, seed_wdocs_by_id):
     # do this the simplest way possible for now ... only insert, no updates.
@@ -1641,19 +1640,17 @@ def is_seeding_repository():
     return (has_db_repository() and
             get_mongoctl_config_val("seedDatabaseRepository", default=False))
 
-def has_seeded_repository(oh_yes_i_have=False):
+def has_seeded_repository():
     """returns True iff we believe that seeding is complete & available"""
     if not is_seeding_repository() or am_bootstrapping():
         return False
 
     global __db_repo_seeded__
-    if oh_yes_i_have :
-        __db_repo_seeded__ = True
     if not __db_repo_seeded__ :
         log_verbose("Hmmm ... I wonder if db repo is up & seeded?")
         __db_repo_seeded__ = _does_db_repo_appear_seeded()
         if not __db_repo_seeded__ :
-            log_info("Hmmm ... I wonder if I should seed this here db repo?")
+            log_verbose("Cannot confirm this here db repo is up & seeded.")
     return __db_repo_seeded__
 
 def _does_db_repo_appear_seeded():
