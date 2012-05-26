@@ -995,21 +995,6 @@ def seed_collection_from_wrapped_doc_dict(clxn, seed_wdocs_by_id):
         log_error("Got an error back from %s.insert : %s"%
                   (clxn.full_name, str(e)))
         
-def crapevolve_seed_db_repository():
-    fs_servers_by_id = get_configured_servers()
-    fs_servers = list(fs_servers_by_id.values())
-    fs_svr_ids = [ s.get_id() for s in fs_servers ]
-    server_clxn = get_mongoctl_server_db_collection()
-    db_servers_preexisting = server_clxn.find({ '_id' : { '$in' : fs_svr_ids } })
-
-    def corresponding_fs_svr( db_svr ):
-        return "turd"
-
-    reseed_candidates = []
-    for db_svr in db_servers_preexisting :
-        reseed_candidates.append( corresponding_fs_svr( db_svr ) )
-
-
 ###############################################################################
 # returns servers saved in the db collection of servers
 def db_lookup_all_servers():
