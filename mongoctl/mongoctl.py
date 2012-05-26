@@ -1621,6 +1621,8 @@ def has_file_repository():
 ###############################################################################
 # Bootstrapping the DB Repository off of the File Repository
 #
+# If configured with "seedDatabaseRepository" : true , then the file repository
+# is only consulted long enough to start the database repository.
 # We assume (for now) that the only place to be seeding the db repository from
 # is the file repository, and so once seeded we only consult the latter.
 #
@@ -1657,7 +1659,6 @@ def _does_db_repo_appear_seeded():
         __db_repo_checking_seeded_ = True # that's what we're doing, yo.
         return (is_seeding_repository() and
                 get_mongoctl_database() is not None)
-        # TODO perhaps we should devise a more careful check? e.g., contents
     except:
         return False
     finally:
